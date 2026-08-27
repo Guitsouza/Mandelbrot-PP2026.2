@@ -13,9 +13,9 @@ void mandelbrot(int *matriz){
         double zr_antigo = 0.0;
         double zi_antigo = 0.0;
         double zr_novo, zi_novo;
-	int iteracao;
+        int j = 0;
 
-        for(iteracao = 0; iteracao < maxi; iteracao++){
+        for( ; j < maxi; j++){
             zr_novo = zr_antigo * zr_antigo - zi_antigo * zi_antigo + real;
             zi_novo = 2.0 * zr_antigo * zi_antigo + imag;
 
@@ -25,12 +25,31 @@ void mandelbrot(int *matriz){
             zi_antigo = zi_novo;
         }
 
-        matriz[i] = iteracao;
+        matriz[i] = j;
     }
+}
+
+void imagem(int *matriz){
+    FILE *arq = fopen ("mandelbrot.ppm", "w");
+    if(arq == NULL){
+        printf("Erro ao abrir o arquivo\n");
+        return;
+    }
+    fprintf(arq, "P3\n");
+    fprintf(arq, "%d %d\n", tam, tam);
+    fprintf(arq, "255\n");
+
+    for (int i = 0; i < tam * tam; i++){
+        int pix = (matriz[i] * 255)/maxi;
+        fprintf(arq, "%d %d %d\n", pix, pix, pix);
+    }
+
+    fclose(arq);
 }
 
 int main(void){
     static int matriz[tam*tam];
     mandelbrot(matriz);
+    imagem(matriz);
     return 0;
 }
