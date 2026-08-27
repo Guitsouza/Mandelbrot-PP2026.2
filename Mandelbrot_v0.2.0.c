@@ -13,8 +13,9 @@ void mandelbrot(int *matriz){
         double zr_antigo = 0.0;
         double zi_antigo = 0.0;
         double zr_novo, zi_novo;
+	int iteracao;
 
-        for(int j = 0; j < maxi; j++){
+        for(iteracao = 0; iteracao < maxi; iteracao++){
             zr_novo = zr_antigo * zr_antigo - zi_antigo * zi_antigo + real;
             zi_novo = 2.0 * zr_antigo * zi_antigo + imag;
 
@@ -24,14 +25,12 @@ void mandelbrot(int *matriz){
             zi_antigo = zi_novo;
         }
 
-        if(zr_novo * zr_novo + zi_novo * zi_novo > 4.0){
-            matriz[i] = 0;
-        }
-        else matriz[i] = 1;
+        matriz[i] = iteracao;
     }
 }
 
 int main(void){
     static int matriz[tam*tam];
     mandelbrot(matriz);
+    return 0;
 }
