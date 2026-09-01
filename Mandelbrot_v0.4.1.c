@@ -60,10 +60,9 @@ void mandelbrot(int *matriz){
         }
 
         matriz[i] = j;
-
-        free(coord_real); 
-        free(coord_imag);
     }
+    free(coord_real); 
+    free(coord_imag);
 }
 
 void imagem(int *matriz){
