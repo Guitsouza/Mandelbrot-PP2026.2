@@ -1,16 +1,23 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+// Mudança 1: Inclusão da biblioteca OpenMp
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 #define tam 4096
 #define maxi 1000
 
-void mandelbrot(int *matriz){
-    // Mudança 1: pré-cálculo dos passos
+// Mudança 2: Alteração do escopo de variaveis e tipo de retorno da função mandelbrot
+// Agora recebe também o número de threads com a qual a área paralelizada irá trabalhar
+// Retorna 0 caso ocorra erros de alocação e 1 se for executada com exito
+
+int mandelbrot(int *matriz, int n){
+
     const double passo_real = (1.0 - (-2.0)) / (tam - 1);
     const double passo_imag = (1.5 - (-1.5)) / (tam - 1);
     
-    // Mudança 2: pré-calcular todas as linhas invés de recalcular para cada pixel
-    // Mudança 3: alocação de memoria dos vetores com todas as coordenadas pré-calculadas
     double *coord_real = malloc(tam * sizeof(double));
     double *coord_imag = malloc(tam * sizeof(double));
 
@@ -18,55 +25,73 @@ void mandelbrot(int *matriz){
         printf("Erro ao alocar memória para as coordenadas\n"); 
         free(coord_real); 
         free(coord_imag); 
-        return; 
+        return 0; 
     }
 
-    // colunas 
-    for(int coluna = 0; coluna < tam; coluna++){ 
-        coord_real[coluna] = -2.0 + coluna * passo_real; 
-    }
+    // Mudança 3: Criação da área paralela
 
-    // linhas 
-    for(int linha = 0; linha < tam; linha++){ 
-        coord_imag[linha] = -1.5 + linha * passo_imag; 
-    }
+    #pragma omp parallel num_threads(n)
+    {
 
-    for(int i = 0; i < tam * tam; i++){
-        int linha = i / tam;
-        int coluna = i % tam;
+        // Mudança 4: Divisão da área paralela entre 3 blocos for
 
-        // Apenas acessa os valores já calculados
-        double real = coord_real[coluna]; 
-        double imag = coord_imag[linha];
-
-        double zr_antigo = 0.0;
-        double zi_antigo = 0.0;
-        double zr_novo, zi_novo;
-        int j = 0;
-
-        for(; j < maxi; j++){
-            zr_novo = zr_antigo * zr_antigo
-                    - zi_antigo * zi_antigo
-                    + real;
-
-            zi_novo = 2.0 * zr_antigo * zi_antigo
-                    + imag;
-
-            if(zr_novo * zr_novo + zi_novo * zi_novo > 4.0)
-                break;
-
-            zr_antigo = zr_novo;
-            zi_antigo = zi_novo;
+        #pragma omp for
+        
+        for(int coluna = 0; coluna < tam; coluna++){ 
+            coord_real[coluna] = -2.0 + coluna * passo_real; 
         }
+    
+        #pragma omp for
 
-        matriz[i] = j;
+        for(int linha = 0; linha < tam; linha++){ 
+            coord_imag[linha] = -1.5 + linha * passo_imag; 
+        }
+    
+        // Mudança 5: Utilização do dynamic para evitar que threads ficassem paradas e sem trabalhar
+        // Obs: Implementar método de teste de eficiência e testar se guided ou dynamic em chunks
+        // seria mais eficiente que só dynamic
+
+        #pragma omp for schedule(dynamic)
+        for(int i = 0; i < tam * tam; i++){
+            int linha = i / tam;
+            int coluna = i % tam;
+
+            double real = coord_real[coluna]; 
+            double imag = coord_imag[linha];
+
+            double zr_antigo = 0.0;
+            double zi_antigo = 0.0;
+            double zr_novo, zi_novo;
+            int j = 0;
+
+            for(; j < maxi; j++){
+                zr_novo = zr_antigo * zr_antigo
+                        - zi_antigo * zi_antigo
+                        + real;
+
+                zi_novo = 2.0 * zr_antigo * zi_antigo
+                        + imag;
+
+                if(zr_novo * zr_novo + zi_novo * zi_novo > 4.0)
+                    break;
+
+                zr_antigo = zr_novo;
+                zi_antigo = zi_novo;
+            }
+
+            matriz[i] = j;
+        }
     }
     free(coord_real); 
     free(coord_imag);
+    return 1;
 }
 
-void imagem(int *matriz){
-    // Mudança 4: escrever arquivo ppm em P6 invés de P3
+// Mudança 6: Alteração do escopo da função imagem
+// Agora também recebe a quantidade de threads que a área paralelizada irá utilizar
+
+void imagem(int *matriz, int n){
+    
     FILE *arq = fopen("mandelbrot.ppm", "wb");
 
     if(arq == NULL){
@@ -74,34 +99,73 @@ void imagem(int *matriz){
         return;
     }
 
-    // P3 mudou para P6
     fprintf(arq, "P6\n");
     fprintf(arq, "%d %d\n", tam, tam);
     fprintf(arq, "255\n");
 
-    for(int i = 0; i < tam * tam; i++){
-        // valores guardados em byte
-        unsigned char pix = (unsigned char)((matriz[i] * 255) / maxi);
-        // 1 byte pra R, 1 para G e 1 para B
-        unsigned char rgb[3] = {pix, pix, pix};
-        // P6 deixa os bytes já no arquivo usando fwrite invés de fprintf
-        fwrite(rgb, sizeof(unsigned char), 3, arq);
+    // Mudança 7: Criação de um array dinamicamente alocado pra guardar os pixeis da imagem
+    // Foi criado para permitir a paralelização da atribuição dos valores dos pixeis
+
+    unsigned char *imagem = malloc((size_t)tam * tam * 3);
+
+    if(imagem == NULL){
+        printf("Erro ao alocar imagem\n");
+        fclose(arq);
+        return;
     }
 
+    // Mudança 8: Criação da área paralelizada para atribuição dos pixeis
+
+    #pragma omp parallel for num_threads(n)
+    {
+        for(int i = 0; i < tam * tam; i++){
+    
+            unsigned char pix = (unsigned char)((matriz[i] * 255) / maxi);
+    
+            imagem[i * 3] = pix;
+            imagem[i * 3 + 1] = pix;
+            imagem[i * 3 + 2] = pix;
+        }
+    }
+
+    // Mudança 9: Escrita sequencial dos valores no arquivo fora do loop
+
+    fwrite(imagem, sizeof(unsigned char), (size_t)tam * tam * 3, arq);
+
+    free(imagem);
     fclose(arq);
 }
 
 int main(void){
-    // Mudança 3: alocação de memória da matriz 
+
+
+    // Mudança 10: Criação de uma variavel n para guardar os números de threads disponiveis
+    // Além disso, é feito uma checagem para ver se a OpenMp está disponivel
+    // se não estiver, o número de threads será 1, evitando erros 
+
+    int n;
+
+    #ifdef _OPENMP
+        n = omp_get_max_threads();
+    #else
+        n = 1;
+    #endif
+
     int *matriz = malloc(tam * tam * sizeof(int));
 
     if(matriz == NULL){ 
-    printf("Erro ao alocar memória para a matriz\n"); 
-    return 1; 
+        printf("Erro ao alocar memória para a matriz\n"); 
+        return 1; 
     }
 
-    mandelbrot(matriz);
-    imagem(matriz);
+    // Mudança 11: Checagem de erro na função mandelbrot antes de chamar a função imagem
+
+    if(!mandelbrot(matriz, n)){
+        free(matriz);
+        return 1;
+    }
+
+    imagem(matriz, n);
 
     free(matriz);
 
