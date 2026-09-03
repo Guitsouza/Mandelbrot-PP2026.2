@@ -117,7 +117,6 @@ void imagem(int *matriz, int n){
     // Mudança 8: Criação da área paralelizada para atribuição dos pixeis
 
     #pragma omp parallel for num_threads(n)
-    {
         for(int i = 0; i < tam * tam; i++){
     
             unsigned char pix = (unsigned char)((matriz[i] * 255) / maxi);
@@ -126,7 +125,6 @@ void imagem(int *matriz, int n){
             imagem[i * 3 + 1] = pix;
             imagem[i * 3 + 2] = pix;
         }
-    }
 
     // Mudança 9: Escrita sequencial dos valores no arquivo fora do loop
 
