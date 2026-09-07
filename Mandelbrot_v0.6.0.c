@@ -1,7 +1,8 @@
 #include <stdlib.h>
 #include <stdio.h>
+// Mudança 1: Inclusão do math.h pra fazer a normalização por log depois
+#include <math.h>
 
-// Mudança 1: Inclusão da biblioteca OpenMp
 #ifdef _OPENMP
 #include <omp.h>
 #endif
@@ -9,9 +10,9 @@
 #define tam 4096
 #define maxi 1000
 
-// Mudança 2: Alteração do escopo de variaveis e tipo de retorno da função mandelbrot
-// Agora recebe também o número de threads com a qual a área paralelizada irá trabalhar
-// Retorna 0 caso ocorra erros de alocação e 1 se for executada com exito
+typedef struct {
+    unsigned char r, g, b;
+} Cor;
 
 int mandelbrot(int *matriz, int n){
 
@@ -28,12 +29,8 @@ int mandelbrot(int *matriz, int n){
         return 0; 
     }
 
-    // Mudança 3: Criação da área paralela
-
     #pragma omp parallel num_threads(n)
     {
-
-        // Mudança 4: Divisão da área paralela entre 3 blocos for
 
         #pragma omp for
         
@@ -46,12 +43,10 @@ int mandelbrot(int *matriz, int n){
         for(int linha = 0; linha < tam; linha++){ 
             coord_imag[linha] = -1.5 + linha * passo_imag; 
         }
-    
-        // Mudança 5: Utilização do dynamic para evitar que threads ficassem paradas e sem trabalhar
-        // Obs: Implementar método de teste de eficiência e testar se guided ou dynamic em chunks
-        // seria mais eficiente que só dynamic
+        
+        double inicio_dynamic = omp_get_wtime();
 
-        #pragma omp for schedule(dynamic)
+        #pragma omp for schedule(dynamic, 500)
         for(int i = 0; i < tam * tam; i++){
             int linha = i / tam;
             int coluna = i % tam;
@@ -81,14 +76,48 @@ int mandelbrot(int *matriz, int n){
 
             matriz[i] = j;
         }
+
+        double fim_dynamic = omp_get_wtime();
+
+        #pragma omp single
+        {
+            printf("Tempo schedule(dynamic, 500): %.6f segundos\n",
+                fim_dynamic - inicio_dynamic);
+        }
     }
     free(coord_real); 
     free(coord_imag);
     return 1;
 }
 
-// Mudança 6: Alteração do escopo da função imagem
-// Agora também recebe a quantidade de threads que a área paralelizada irá utilizar
+// Mudança 2: Criação da função para mapear as cores dos pixeis, 
+// a funçao converte um valor entre 0 e 1 para uma cor RGB
+
+void mapa_cores(double valor, unsigned char *r, unsigned char *g, unsigned char *b) {
+    const Cor cores[] = {
+        {11,  29,  58},   // #0B1D3A
+        {18,  56, 110},   // #12386E
+        {31, 111, 180},   // #1F6FB4
+        {34, 182, 200},   // #22B6C8
+        {240, 180,  41},  // #F0B429
+        {255, 243, 209}   // #FFF3D1
+    };
+
+    if (valor < 0.0) valor = 0.0;
+    if (valor > 1.0) valor = 1.0;
+
+    double pos = valor * 5.0;
+    int i = (int)pos;
+
+    if (i > 4) i = 4;
+
+    double t = pos - i;
+
+    *r = cores[i].r + t * (cores[i + 1].r - cores[i].r);
+    *g = cores[i].g + t * (cores[i + 1].g - cores[i].g);
+    *b = cores[i].b + t * (cores[i + 1].b - cores[i].b);
+}
+
 
 void imagem(int *matriz, int n){
     
@@ -103,9 +132,6 @@ void imagem(int *matriz, int n){
     fprintf(arq, "%d %d\n", tam, tam);
     fprintf(arq, "255\n");
 
-    // Mudança 7: Criação de um array dinamicamente alocado pra guardar os pixeis da imagem
-    // Foi criado para permitir a paralelização da atribuição dos valores dos pixeis
-
     unsigned char *imagem = malloc((size_t)tam * tam * 3);
 
     if(imagem == NULL){
@@ -114,19 +140,45 @@ void imagem(int *matriz, int n){
         return;
     }
 
-    // Mudança 8: Criação da área paralelizada para atribuição dos pixeis
+// Mudança 3: Adaptar a função imagem para gerar cores
+    unsigned char cores[maxi][3];
+
+// normalização logarítmica para todos os valores do mapa de cores
+    double log_maxi = log1p((double)maxi);
+
+    for (int i = 0; i < maxi; i++) {
+        double valor = log1p((double)i) / log_maxi;
+
+        mapa_cores(
+            valor,
+            &cores[i][0],
+            &cores[i][1],
+            &cores[i][2]
+        );
+    }
+
+    double inicio_imagem = omp_get_wtime();
 
     #pragma omp parallel for num_threads(n)
         for(int i = 0; i < tam * tam; i++){
-    
-            unsigned char pix = (unsigned char)((matriz[i] * 255) / maxi);
-    
-            imagem[i * 3] = pix;
-            imagem[i * 3 + 1] = pix;
-            imagem[i * 3 + 2] = pix;
+            int iter = matriz[i];
+
+// se o pixel chegou no máximo de iterações,
+// ele é parte do interior do conjunto.
+            if (iter >= maxi) {
+                imagem[i * 3]     = 11;
+                imagem[i * 3 + 1] = 29;
+                imagem[i * 3 + 2] = 58;
+            } else {
+                imagem[i * 3]     = cores[iter][0];
+                imagem[i * 3 + 1] = cores[iter][1];
+                imagem[i * 3 + 2] = cores[iter][2];
+            }
         }
 
-    // Mudança 9: Escrita sequencial dos valores no arquivo fora do loop
+    double fim_imagem = omp_get_wtime();
+
+    printf("Tempo do for da imagem: %.6f segundos\n", fim_imagem - inicio_imagem);
 
     fwrite(imagem, sizeof(unsigned char), (size_t)tam * tam * 3, arq);
 
@@ -136,18 +188,15 @@ void imagem(int *matriz, int n){
 
 int main(void){
 
-
-    // Mudança 10: Criação de uma variavel n para guardar os números de threads disponiveis
-    // Além disso, é feito uma checagem para ver se a OpenMp está disponivel
-    // se não estiver, o número de threads será 1, evitando erros 
-
     int n;
 
     #ifdef _OPENMP
         n = omp_get_max_threads();
     #else
         n = 1;
-    #endif
+    #endif 
+
+    printf("Numero de threads: %d\n", n);
 
     int *matriz = malloc(tam * tam * sizeof(int));
 
@@ -155,8 +204,6 @@ int main(void){
         printf("Erro ao alocar memória para a matriz\n"); 
         return 1; 
     }
-
-    // Mudança 11: Checagem de erro na função mandelbrot antes de chamar a função imagem
 
     if(!mandelbrot(matriz, n)){
         free(matriz);
